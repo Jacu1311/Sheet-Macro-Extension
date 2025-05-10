@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Sheet macro extension",
+  "version": "1.1",
+  "description": "Reemplaza abreviaciones usando Google Sheets",
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://docs.google.com/spreadsheets/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Configurar snippets"
+  },
+  "icons": {
+    "128": "icon.png"
+  }
+}
