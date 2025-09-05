@@ -65,8 +65,40 @@ function createSnippetModal(snippets, targetElement) {
     max-height: 300px;
     overflow-y: auto;
     min-width: 300px;
-    font-family: sans-serif;
+    font-family: sans-serif
   `;
+
+  // Crear botón de cierre
+  const closeButton = document.createElement("button");
+  closeButton.textContent = "×";
+  closeButton.style = `
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: #666;
+    padding: 0;
+  `;
+  closeButton.addEventListener("mouseover", () => {
+    closeButton.style.backgroundColor = "#f0f0f0";
+  });
+  closeButton.addEventListener("mouseout", () => {
+    closeButton.style.backgroundColor = "transparent";
+  });
+  closeButton.addEventListener("click", () => {
+    modal.remove();
+  });
+
+  modal.appendChild(closeButton);
 
   const title = document.createElement("div");
   title.textContent = "Selecciona un snippet:";
@@ -85,11 +117,6 @@ function createSnippetModal(snippets, targetElement) {
   }
 
   document.body.appendChild(modal);
-
-  // Cerrar con Escape
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") modal.remove();
-  }, { once: true });
 }
 
 // Inserta snippet reemplazando '._'
