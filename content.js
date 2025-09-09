@@ -1,12 +1,56 @@
 let snippets = {};
+const CACHE_DURATION = 3600000; // 1 hour in milliseconds
+
+// Cache management functions
+async function getCachedSnippets() {
+  const result = await chrome.storage.local.get(['snippetsCache', 'snippetsCacheTime']);
+  if (result.snippetsCache && result.snippetsCacheTime) {
+    if (Date.now() - result.snippetsCacheTime < CACHE_DURATION) {
+      return result.snippetsCache;
+    }
+  }
+  return null;
+}
+
+async function setCachedSnippets(snippetsData) {
+  await chrome.storage.local.set({
+    snippetsCache: snippetsData,
+    snippetsCacheTime: Date.now()
+  });
+}
+
+// Show loading indicator
+function showLoadingIndicator() {
+  const loader = document.createElement('div');
+  loader.id = 'snippets-loader';
+  loader.innerHTML = `
+    <div style="
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: white;
+      padding: 10px 20px;
+      border-radius: 5px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      z-index: 10000;
+      font-family: sans-serif;
+    ">
+      <span>Cargando snippets...</span>
+    </div>
+  `;
+  document.body.appendChild(loader);
+}
+
+function removeLoadingIndicator() {
+  const loader = document.getElementById('snippets-loader');
+  if (loader) loader.remove();
+}
 
 // Parser de formato enriquecido plano
 function parseRichTextToPlain(text) {
   return text
-    .replace(/\*(.*?)\*/g, (_, bold) => bold.toUpperCase()) // *negrita* → NEGRITA
-    .replace(/_(.*?)_/g, (_, italic) => italic)              // _cursiva_ → cursiva
-    .replace(/^[-*] /gm, '• ')                               // - item → • item
-    .replace(/\\n/g, '\n');                                  // \n literal → salto de línea
+    .replace(/^[-*] /gm, '• ')                                      // - item → • item
+    .replace(/\\n/g, '\n');                                         // \n literal → salto de línea
 }
 
 // Detecta trigger y reemplaza texto
@@ -18,23 +62,12 @@ function processElement(element) {
     if (original.includes(triggerKey)) {
       const replacement = parseRichTextToPlain(snippets[triggerKey]);
 
-      // Reemplazar salto de línea en el valor del elemento
-      const updated = replacement.replace(/\n/g, () => {
-        if (typeof element.value === 'string') {
-          // Inserta un salto de línea dentro de un textarea o input
-          const before = element.value.slice(0, element.selectionStart);
-          const after = element.value.slice(element.selectionStart);
-          element.value = before + '\n' + after;
-        } else {
-          // Para elementos contenteditable, agregamos un salto de línea al texto
-          element.textContent = element.textContent + '\n';
-        }
-      });
-
       if (typeof element.value === 'string') {
-        element.value = updated;
+        // For regular inputs and textareas, we can't use HTML
+        element.value = replacement.replace(/<[^>]+>/g, '');
       } else if (isContentEditable(element)) {
-        element.textContent = updated;
+        // For contenteditable elements, we can use HTML
+        element.innerHTML = replacement;
       }
     }
   }
@@ -171,6 +204,105 @@ function attachListeners() {
       handleInput(el);
     }
   });
+}
+
+// Enhanced CSV processing with error handling
+function processCSV(csvText) {
+  try {
+    const lines = csvText.trim().split("\n");
+    if (lines.length < 2) {
+      throw new Error("CSV file is empty or malformed");
+    }
+
+    const headers = lines[0].toLowerCase();
+    if (!headers.includes("trigger") || !headers.includes("snippet")) {
+      throw new Error("CSV must contain 'trigger' and 'snippet' columns");
+    }
+
+    const newSnippets = {};
+    for (let i = 1; i < lines.length; i++) {
+      const row = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+      if (row && row.length >= 2) {
+        const key = row[0].replace(/^"|"$/g, "").trim();
+        const snippet = row[1].replace(/^"|"$/g, "").trim();
+
+        if (key && snippet) {
+          newSnippets[key] = snippet.replace(/\\n/g, '\n');
+        }
+      }
+    }
+
+    if (Object.keys(newSnippets).length === 0) {
+      throw new Error("No valid snippets found in CSV");
+    }
+
+    return newSnippets;
+  } catch (error) {
+    console.error("Error processing CSV:", error);
+    throw error;
+  }
+}
+
+// Modified main loading function
+async function loadSnippets() {
+  showLoadingIndicator();
+
+  try {
+    // Try to get cached snippets first
+    const cachedSnippets = await getCachedSnippets();
+    if (cachedSnippets) {
+      snippets = cachedSnippets;
+      attachListeners();
+      removeLoadingIndicator();
+      return;
+    }
+
+    const result = await chrome.storage.sync.get(['sheetUrl']);
+    if (!result.sheetUrl) {
+      throw new Error("No sheet URL configured");
+    }
+
+    const match = result.sheetUrl.match(/\/d\/([^\/]+)\//);
+    if (!match) {
+      throw new Error("Invalid Google Sheets URL");
+    }
+
+    const spreadsheetId = match[1];
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv`;
+
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const csvText = await response.text();
+    snippets = processCSV(csvText);
+    await setCachedSnippets(snippets);
+    attachListeners();
+    console.log("Snippets loaded successfully:", snippets);
+
+  } catch (error) {
+    console.error("Failed to load snippets:", error);
+    // Show error to user
+    const errorDiv = document.createElement('div');
+    errorDiv.style = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #fee;
+      color: #c00;
+      padding: 10px 20px;
+      border-radius: 5px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      z-index: 10000;
+      font-family: sans-serif;
+    `;
+    errorDiv.textContent = `Error: ${error.message}`;
+    document.body.appendChild(errorDiv);
+    setTimeout(() => errorDiv.remove(), 5000);
+  } finally {
+    removeLoadingIndicator();
+  }
 }
 
 // Función para procesar el CSV correctamente, manejando comas y saltos de línea
